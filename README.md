@@ -2,29 +2,51 @@
 
 Professional Telegram bot for menu → cart → payment flow with Click/Payme and Django admin.
 
-## Setup (Windows)
-1) Create venv and install packages
-```
+## Quick Start (Lokal test - Polling rejimi)
+
+1) Virtual environment yarating
+```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-2) Configure env
-```
+2) `.env` faylni yarating
+```powershell
 copy env.example .env
+notepad .env
 ```
-Fill in BOT_TOKEN, WEBHOOK_URL, and payment credentials.
+`.env` ichida `BOT_TOKEN=` qatoriga tokenni qo'ying (chatga yozmang!)
 
-3) Migrate and create admin
-```
+3) Ma'lumotlar bazasini tayyorlang
+```powershell
 python manage.py migrate
 python manage.py createsuperuser
 ```
 
-4) Start server
-```
+4) Admin panelga Category va Product qo'shing
+```powershell
 python manage.py runserver
+```
+Brauzerda: `http://localhost:8000/admin/`
+
+5) Botni ishga tushiring (polling)
+```powershell
+python run_bot.py
+```
+
+Tayyor! Botni Telegram'da sinab ko'ring.
+
+---
+
+## Production (Webhook rejimi)
+
+1-3 qadamlar bir xil
+
+4) `.env` ichida webhook sozlang
+```
+WEBHOOK_URL=https://your-domain.com/bot/webhook/
+SITE_URL=https://your-domain.com
 ```
 
 5) Set webhook

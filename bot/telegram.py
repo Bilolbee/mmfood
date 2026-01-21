@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.types import CallbackQuery, Message
+from asgiref.sync import sync_to_async
 from django.conf import settings
 
 from shop.models import Category, Product, TelegramUser
@@ -36,34 +37,34 @@ def _user_lang(user: TelegramUser) -> str:
 
 @router.message(F.text == "/start")
 async def start_handler(message: Message) -> None:
-    user = get_or_create_user(
+    user = await get_or_create_user(
         telegram_id=message.from_user.id,
         full_name=message.from_user.full_name or "",
         username=message.from_user.username or "",
     )
     user.state = "language"
-    user.save(update_fields=["state"])
+    await sync_to_async(user.save)(update_fields=["state"])
     await message.answer(t("uz", "choose_language"), reply_markup=language_keyboard())
 
 
 @router.callback_query(F.data.startswith("lang:"))
 async def language_handler(callback: CallbackQuery) -> None:
     lang = callback.data.split(":")[1]
-    user = get_or_create_user(
+    user = await get_or_create_user(
         telegram_id=callback.from_user.id,
         full_name=callback.from_user.full_name or "",
         username=callback.from_user.username or "",
     )
     user.language = lang
     user.state = "menu"
-    user.save(update_fields=["language", "state"])
-    await callback.message.answer(t(lang, "menu_title"), reply_markup=menu_keyboard(lang))
+    await sync_to_async(user.save)(update_fields=["language", "state"])
+    await callback.message.answer(t(lang, "menu_title"), reply_markup=await menu_keyboard(lang))
     await callback.answer()
 
 
 @router.message()
 async def message_handler(message: Message) -> None:
-    user = get_or_create_user(
+    user = await get_or_create_user(
         telegram_id=message.from_user.id,
         full_name=message.from_user.full_name or "",
         username=message.from_user.username or "",
@@ -76,18 +77,21 @@ async def message_handler(message: Message) -> None:
         return
 
     if text == "💳 To'lov":
-        order = create_order_from_cart(user)
+        order = await create_order_from_cart(user)
         if not order:
             await message.answer(t(lang, "cart_empty"))
             return
         await message.answer(t(lang, "order_created"), reply_markup=payment_keyboard(order.id))
         return
 
-    category = Category.objects.filter(
-        is_active=True, name_uz=text
-    ).first() or Category.objects.filter(is_active=True, name_ru=text).first()
+    category = await sync_to_async(
+        lambda: Category.objects.filter(is_active=True, name_uz=text).first()
+        or Category.objects.filter(is_active=True, name_ru=text).first()
+    )()
     if category:
-        products = Product.objects.filter(category=category, is_active=True).order_by("id")
+        products = await sync_to_async(list)(
+            Product.objects.filter(category=category, is_active=True).order_by("id")
+        )
         if not products:
             await message.answer("Hozircha mahsulot yo'q.")
             return
@@ -100,34 +104,36 @@ async def message_handler(message: Message) -> None:
             )
         return
 
-    await message.answer(t(lang, "menu_title"), reply_markup=menu_keyboard(lang))
+    await message.answer(t(lang, "menu_title"), reply_markup=await menu_keyboard(lang))
 
 
 @router.callback_query(F.data.startswith("add:"))
 async def add_to_cart_handler(callback: CallbackQuery) -> None:
     product_id = int(callback.data.split(":")[1])
-    product = Product.objects.filter(id=product_id, is_active=True).first()
+    product = await sync_to_async(
+        Product.objects.filter(id=product_id, is_active=True).first
+    )()
     if not product:
         await callback.answer("Mahsulot topilmadi.", show_alert=True)
         return
-    user = get_or_create_user(
+    user = await get_or_create_user(
         telegram_id=callback.from_user.id,
         full_name=callback.from_user.full_name or "",
         username=callback.from_user.username or "",
     )
-    add_to_cart(user, product, qty=1)
+    await add_to_cart(user, product, qty=1)
     await callback.answer()
     await callback.message.answer(t(_user_lang(user), "added_to_cart"))
 
 
 @router.callback_query(F.data == "cart:clear")
 async def cart_clear_handler(callback: CallbackQuery) -> None:
-    user = get_or_create_user(
+    user = await get_or_create_user(
         telegram_id=callback.from_user.id,
         full_name=callback.from_user.full_name or "",
         username=callback.from_user.username or "",
     )
-    clear_cart(user)
+    await clear_cart(user)
     await callback.answer()
     await callback.message.answer(t(_user_lang(user), "cart_cleared"))
 
@@ -138,28 +144,35 @@ async def payment_handler(callback: CallbackQuery) -> None:
     order_id = int(order_id)
     from payments.utils import build_payment_link, mark_order_provider
 
-    user = get_or_create_user(
+    user = await get_or_create_user(
         telegram_id=callback.from_user.id,
         full_name=callback.from_user.full_name or "",
         username=callback.from_user.username or "",
     )
-    link = build_payment_link(order_id, provider)
+    link = await sync_to_async(build_payment_link)(order_id, provider)
     if not link:
         await callback.answer("To'lov xatosi.", show_alert=True)
         return
-    mark_order_provider(order_id, provider)
+    await sync_to_async(mark_order_provider)(order_id, provider)
     await callback.message.answer(f"{t(_user_lang(user), 'choose_payment')}\n{link}")
     await callback.answer()
 
 
 async def _send_cart(message: Message, user: TelegramUser, lang: str) -> None:
-    cart = user.cart_set.filter(is_active=True).prefetch_related("items__product").first()
-    if not cart or cart.items.count() == 0:
+    cart = await sync_to_async(
+        lambda: user.cart_set.filter(is_active=True).prefetch_related("items__product").first()
+    )()
+    if not cart:
+        await message.answer(t(lang, "cart_empty"))
+        return
+    items_count = await sync_to_async(cart.items.count)()
+    if items_count == 0:
         await message.answer(t(lang, "cart_empty"))
         return
     lines = []
     total = Decimal("0")
-    for item in cart.items.all():
+    items = await sync_to_async(list)(cart.items.select_related("product").all())
+    for item in items:
         name = item.product.name_uz if lang == "uz" else (item.product.name_ru or item.product.name_uz)
         line_total = item.product.price * item.qty
         total += line_total

@@ -1,4 +1,10 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
+from asgiref.sync import sync_to_async
 
 from shop.models import Category
 
@@ -14,19 +20,21 @@ def language_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def menu_keyboard(language: str) -> ReplyKeyboardMarkup:
-    categories = Category.objects.filter(is_active=True).order_by("id")
+async def menu_keyboard(language: str) -> ReplyKeyboardMarkup:
+    categories = await sync_to_async(list)(
+        Category.objects.filter(is_active=True).order_by("id")
+    )
     rows = []
     row = []
     for category in categories:
         name = category.name_uz if language == "uz" else (category.name_ru or category.name_uz)
-        row.append(name)
+        row.append(KeyboardButton(text=name))
         if len(row) == 2:
             rows.append(row)
             row = []
     if row:
         rows.append(row)
-    rows.append(["🛒 Savat", "💳 To'lov"])
+    rows.append([KeyboardButton(text="🛒 Savat"), KeyboardButton(text="💳 To'lov")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 

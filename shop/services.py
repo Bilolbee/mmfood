@@ -1,8 +1,10 @@
 from decimal import Decimal
+from asgiref.sync import sync_to_async
 
 from .models import Cart, CartItem, Order, OrderItem, Product, TelegramUser
 
 
+@sync_to_async
 def get_or_create_user(telegram_id: int, full_name: str, username: str) -> TelegramUser:
     user, _created = TelegramUser.objects.get_or_create(
         telegram_id=telegram_id,
@@ -16,14 +18,16 @@ def get_or_create_user(telegram_id: int, full_name: str, username: str) -> Teleg
     return user
 
 
+@sync_to_async
 def get_active_cart(user: TelegramUser) -> Cart:
     cart, _created = Cart.objects.get_or_create(user=user, is_active=True)
     return cart
 
 
+@sync_to_async
 def add_to_cart(user: TelegramUser, product: Product, qty: int = 1) -> CartItem:
-    cart = get_active_cart(user)
-    item, created = CartItem.objects.get_or_create(cart=cart, product=product)
+    cart_sync = Cart.objects.get_or_create(user=user, is_active=True)[0]
+    item, created = CartItem.objects.get_or_create(cart=cart_sync, product=product)
     if created:
         item.qty = qty
     else:
@@ -32,6 +36,7 @@ def add_to_cart(user: TelegramUser, product: Product, qty: int = 1) -> CartItem:
     return item
 
 
+@sync_to_async
 def clear_cart(user: TelegramUser) -> None:
     Cart.objects.filter(user=user, is_active=True).delete()
 
@@ -43,6 +48,7 @@ def cart_total(cart: Cart) -> Decimal:
     return total
 
 
+@sync_to_async
 def create_order_from_cart(user: TelegramUser) -> Order | None:
     cart = Cart.objects.filter(user=user, is_active=True).prefetch_related(
         "items__product"
