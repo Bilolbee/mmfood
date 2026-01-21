@@ -26,7 +26,6 @@ async def webhook(request: HttpRequest) -> HttpResponse:
     bot = get_bot()
     dp = get_dispatcher()
     await dp.feed_update(bot, update)
-    await bot.session.close()
     return JsonResponse({"ok": True})
 from django.shortcuts import render
 
