@@ -141,11 +141,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 
-CLICK_SERVICE_ID = os.getenv("CLICK_SERVICE_ID", "")
-CLICK_MERCHANT_ID = os.getenv("CLICK_MERCHANT_ID", "")
-CLICK_SECRET_KEY = os.getenv("CLICK_SECRET_KEY", "")
-
-PAYME_MERCHANT_ID = os.getenv("PAYME_MERCHANT_ID", "")
-PAYME_SECRET_KEY = os.getenv("PAYME_SECRET_KEY", "")
+# Karta ma'lumotlari
+PAYMENT_CARD_NUMBER = os.getenv("PAYMENT_CARD_NUMBER", "8600 0000 0000 0000")
+PAYMENT_CARD_HOLDER = os.getenv("PAYMENT_CARD_HOLDER", "BILOL ABDULLAYEV")
 
 SITE_URL = os.getenv("SITE_URL", "https://example.com")
+
+ASGI_APPLICATION = "config.asgi.application"

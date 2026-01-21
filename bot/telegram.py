@@ -14,7 +14,6 @@ from .keyboards import (
     cart_actions_keyboard,
     language_keyboard,
     menu_keyboard,
-    payment_keyboard,
 )
 from .messages import t
 
@@ -90,7 +89,16 @@ async def message_handler(message: Message) -> None:
         if not order:
             await message.answer(t(lang, "cart_empty"))
             return
-        await message.answer(t(lang, "order_created"), reply_markup=payment_keyboard(order.id))
+        
+        # Karta ma'lumotlarini ko'rsatish
+        payment_text = t(lang, "payment_info").format(
+            card_number=settings.PAYMENT_CARD_NUMBER,
+            card_holder=settings.PAYMENT_CARD_HOLDER,
+            amount=f"{order.total:.0f}",
+            order_id=order.id,
+        )
+        await message.answer(t(lang, "order_created"))
+        await message.answer(payment_text)
         return
 
     category = await sync_to_async(
@@ -145,26 +153,6 @@ async def cart_clear_handler(callback: CallbackQuery) -> None:
     await clear_cart(user)
     await callback.answer()
     await callback.message.answer(t(_user_lang(user), "cart_cleared"))
-
-
-@router.callback_query(F.data.startswith("pay:"))
-async def payment_handler(callback: CallbackQuery) -> None:
-    _, provider, order_id = callback.data.split(":")
-    order_id = int(order_id)
-    from payments.utils import build_payment_link, mark_order_provider
-
-    user = await get_or_create_user(
-        telegram_id=callback.from_user.id,
-        full_name=callback.from_user.full_name or "",
-        username=callback.from_user.username or "",
-    )
-    link = await sync_to_async(build_payment_link)(order_id, provider)
-    if not link:
-        await callback.answer("To'lov xatosi.", show_alert=True)
-        return
-    await sync_to_async(mark_order_provider)(order_id, provider)
-    await callback.message.answer(f"{t(_user_lang(user), 'choose_payment')}\n{link}")
-    await callback.answer()
 
 
 async def _send_cart(message: Message, user: TelegramUser, lang: str) -> None:

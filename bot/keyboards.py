@@ -52,14 +52,3 @@ def cart_actions_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🧹 Savatni tozalash", callback_data="cart:clear")]
         ]
     )
-
-
-def payment_keyboard(order_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="Click", callback_data=f"pay:click:{order_id}"),
-                InlineKeyboardButton(text="Payme", callback_data=f"pay:payme:{order_id}"),
-            ]
-        ]
-    )
