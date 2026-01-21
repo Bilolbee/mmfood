@@ -1,0 +1,177 @@
+import asyncio
+from decimal import Decimal
+
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.types import CallbackQuery, Message
+from django.conf import settings
+
+from shop.models import Category, Product, TelegramUser
+from shop.services import add_to_cart, clear_cart, create_order_from_cart, get_or_create_user
+
+from .keyboards import (
+    add_to_cart_keyboard,
+    cart_actions_keyboard,
+    language_keyboard,
+    menu_keyboard,
+    payment_keyboard,
+)
+from .messages import t
+
+router = Router()
+
+
+def get_bot() -> Bot:
+    return Bot(token=settings.BOT_TOKEN)
+
+
+def get_dispatcher() -> Dispatcher:
+    dp = Dispatcher()
+    dp.include_router(router)
+    return dp
+
+
+def _user_lang(user: TelegramUser) -> str:
+    return user.language or "uz"
+
+
+@router.message(F.text == "/start")
+async def start_handler(message: Message) -> None:
+    user = get_or_create_user(
+        telegram_id=message.from_user.id,
+        full_name=message.from_user.full_name or "",
+        username=message.from_user.username or "",
+    )
+    user.state = "language"
+    user.save(update_fields=["state"])
+    await message.answer(t("uz", "choose_language"), reply_markup=language_keyboard())
+
+
+@router.callback_query(F.data.startswith("lang:"))
+async def language_handler(callback: CallbackQuery) -> None:
+    lang = callback.data.split(":")[1]
+    user = get_or_create_user(
+        telegram_id=callback.from_user.id,
+        full_name=callback.from_user.full_name or "",
+        username=callback.from_user.username or "",
+    )
+    user.language = lang
+    user.state = "menu"
+    user.save(update_fields=["language", "state"])
+    await callback.message.answer(t(lang, "menu_title"), reply_markup=menu_keyboard(lang))
+    await callback.answer()
+
+
+@router.message()
+async def message_handler(message: Message) -> None:
+    user = get_or_create_user(
+        telegram_id=message.from_user.id,
+        full_name=message.from_user.full_name or "",
+        username=message.from_user.username or "",
+    )
+    lang = _user_lang(user)
+    text = (message.text or "").strip()
+
+    if text == "🛒 Savat":
+        await _send_cart(message, user, lang)
+        return
+
+    if text == "💳 To'lov":
+        order = create_order_from_cart(user)
+        if not order:
+            await message.answer(t(lang, "cart_empty"))
+            return
+        await message.answer(t(lang, "order_created"), reply_markup=payment_keyboard(order.id))
+        return
+
+    category = Category.objects.filter(
+        is_active=True, name_uz=text
+    ).first() or Category.objects.filter(is_active=True, name_ru=text).first()
+    if category:
+        products = Product.objects.filter(category=category, is_active=True).order_by("id")
+        if not products:
+            await message.answer("Hozircha mahsulot yo'q.")
+            return
+        for product in products:
+            name = product.name_uz if lang == "uz" else (product.name_ru or product.name_uz)
+            price = f"{product.price:.2f}"
+            await message.answer(
+                f"{name}\nNarx: {price}",
+                reply_markup=add_to_cart_keyboard(product.id),
+            )
+        return
+
+    await message.answer(t(lang, "menu_title"), reply_markup=menu_keyboard(lang))
+
+
+@router.callback_query(F.data.startswith("add:"))
+async def add_to_cart_handler(callback: CallbackQuery) -> None:
+    product_id = int(callback.data.split(":")[1])
+    product = Product.objects.filter(id=product_id, is_active=True).first()
+    if not product:
+        await callback.answer("Mahsulot topilmadi.", show_alert=True)
+        return
+    user = get_or_create_user(
+        telegram_id=callback.from_user.id,
+        full_name=callback.from_user.full_name or "",
+        username=callback.from_user.username or "",
+    )
+    add_to_cart(user, product, qty=1)
+    await callback.answer()
+    await callback.message.answer(t(_user_lang(user), "added_to_cart"))
+
+
+@router.callback_query(F.data == "cart:clear")
+async def cart_clear_handler(callback: CallbackQuery) -> None:
+    user = get_or_create_user(
+        telegram_id=callback.from_user.id,
+        full_name=callback.from_user.full_name or "",
+        username=callback.from_user.username or "",
+    )
+    clear_cart(user)
+    await callback.answer()
+    await callback.message.answer(t(_user_lang(user), "cart_cleared"))
+
+
+@router.callback_query(F.data.startswith("pay:"))
+async def payment_handler(callback: CallbackQuery) -> None:
+    _, provider, order_id = callback.data.split(":")
+    order_id = int(order_id)
+    from payments.utils import build_payment_link, mark_order_provider
+
+    user = get_or_create_user(
+        telegram_id=callback.from_user.id,
+        full_name=callback.from_user.full_name or "",
+        username=callback.from_user.username or "",
+    )
+    link = build_payment_link(order_id, provider)
+    if not link:
+        await callback.answer("To'lov xatosi.", show_alert=True)
+        return
+    mark_order_provider(order_id, provider)
+    await callback.message.answer(f"{t(_user_lang(user), 'choose_payment')}\n{link}")
+    await callback.answer()
+
+
+async def _send_cart(message: Message, user: TelegramUser, lang: str) -> None:
+    cart = user.cart_set.filter(is_active=True).prefetch_related("items__product").first()
+    if not cart or cart.items.count() == 0:
+        await message.answer(t(lang, "cart_empty"))
+        return
+    lines = []
+    total = Decimal("0")
+    for item in cart.items.all():
+        name = item.product.name_uz if lang == "uz" else (item.product.name_ru or item.product.name_uz)
+        line_total = item.product.price * item.qty
+        total += line_total
+        lines.append(f"{name} x{item.qty} = {line_total:.2f}")
+    lines.append(f"Jami: {total:.2f}")
+    await message.answer("\n".join(lines), reply_markup=cart_actions_keyboard())
+
+
+def send_payment_success(telegram_id: int, lang: str = "uz") -> None:
+    async def _send() -> None:
+        bot = get_bot()
+        await bot.send_message(chat_id=telegram_id, text=t(lang, "payment_success"))
+        await bot.session.close()
+
+    asyncio.run(_send())
