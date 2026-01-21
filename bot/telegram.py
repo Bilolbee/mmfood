@@ -20,15 +20,24 @@ from .messages import t
 
 router = Router()
 
+# Singletons to avoid re-attaching router
+_bot_instance = None
+_dp_instance = None
+
 
 def get_bot() -> Bot:
-    return Bot(token=settings.BOT_TOKEN)
+    global _bot_instance
+    if _bot_instance is None:
+        _bot_instance = Bot(token=settings.BOT_TOKEN)
+    return _bot_instance
 
 
 def get_dispatcher() -> Dispatcher:
-    dp = Dispatcher()
-    dp.include_router(router)
-    return dp
+    global _dp_instance
+    if _dp_instance is None:
+        _dp_instance = Dispatcher()
+        _dp_instance.include_router(router)
+    return _dp_instance
 
 
 def _user_lang(user: TelegramUser) -> str:
